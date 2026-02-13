@@ -1,0 +1,51 @@
+from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO
+import paho.mqtt.client as mqtt
+import json
+
+app = Flask(__name__)
+
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+TEAM_ID = "iphone"
+MQTT_BROKER = "157.173.101.159"
+TOPIC_STATUS = f"rfid/{TEAM_ID}/card/status"
+TOPIC_TOPUP = f"rfid/{TEAM_ID}/card/topup"
+TOPIC_BALANCE = f"rfid/{TEAM_ID}/card/balance"
+
+def on_connect(client, userdata, flags, rc):
+    print(f"Connected to MQTT with result code {rc}")
+    client.subscribe(TOPIC_STATUS)
+    client.subscribe(TOPIC_BALANCE)
+
+def on_message(client, userdata, msg):
+    try:
+        payload = json.loads(msg.payload.decode())
+        print(f"Received MQTT: {payload}")
+        
+        socketio.emit('update_dashboard', payload)
+    except Exception as e:
+        print(f"Error parsing MQTT message: {e}")
+
+mqtt_client = mqtt.Client()
+mqtt_client.on_connect = on_connect
+mqtt_client.on_message = on_message
+
+mqtt_client.connect(MQTT_BROKER, 1883, 60)
+mqtt_client.loop_start()
+
+@app.route('/')
+def index():
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
+    return render_template('dashboard_v2.html')
+
+@app.route('/topup', methods=['POST'])
+def handle_topup():
+    data = request.json
+    payload = json.dumps(data)
+    print(f"Publishing TOPUP to {TOPIC_TOPUP}: {payload}")
+    mqtt_client.publish(TOPIC_TOPUP, payload)
+    return jsonify({"status": "Command sent to device"})
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=9274, allow_unsafe_werkzeug=True)
